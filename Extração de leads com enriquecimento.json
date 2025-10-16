@@ -1,0 +1,358 @@
+{
+  "name": "Extração de leads com enriquecimento",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -928,
+        48
+      ],
+      "id": "cc8cfd3f-7efe-43e4-8440-9d2106bdf1ca",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "url": "https://www.abrasem.com.br/abcsem/",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -688,
+        48
+      ],
+      "id": "39fb97c5-c487-42c7-aee8-574c7f864616",
+      "name": "HTTP Request",
+      "retryOnFail": true
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=# FLUXO DE TRABALHO: EXTRAÇÃO DE LEADS\n\n1.  **FONTE:** Analise o seguinte conteúdo HTML:{{ $json.data }}\n2.  **OBJETIVO:** Identifique a seção que contém a lista de parceiros da ABCSEM.\n\n3.  **AÇÃO:** Para CADA parceiro na lista, extraia os seguintes dados:\n    * `nomeEmpresa`\n    * `enderecoCompleto`\n    * `site`\n    * `segmento`\n    * `telefonePrincipal`\n\n4.  **SAÍDA:** Retorne uma lista de objetos em formato JSON. Não inclua nenhum outro texto, markdown (como `json`), ou explicações na sua resposta. Sua resposta deve ser APENAS o código JSON.",
+        "options": {
+          "systemMessage": "Você é um assistente de Inteligência de Negócios especializado em extração de dados. Sua função é extrair dados brutos de fontes HTML e estruturá-los em formato JSON limpo. Responda apenas com o código JSON solicitado."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.2,
+      "position": [
+        -528,
+        48
+      ],
+      "id": "db35e9ba-ce79-4ae9-a0ea-917f76c9dde9",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        -528,
+        256
+      ],
+      "id": "556c69e1-9685-45c9-bb4d-3c205710e8f4",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "wpnXxOUztkU1HN0P",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Pega a saída de texto do nó anterior (o AI Agent)\nconst aiOutputText = $input.first().json.output;\n\n// Remove os marcadores de bloco de código e a palavra \"json\"\n// e remove espaços em branco extras no início e no fim.\nconst cleanedText = aiOutputText\n  .replace(/^```json\\s*/, '') // Remove ```json do início\n  .replace(/```$/, '')       // Remove ``` do final\n  .trim();                   // Garante que não há espaços em branco nas pontas\n\n// Converte a string de texto JÁ LIMPA em um objeto JSON real\nconst jsonData = JSON.parse(cleanedText);\n\n// O n8n precisa que retornemos um array de objetos.\n// Como a nossa saída já é um array (lista de empresas), podemos retorná-lo diretamente.\nreturn jsonData;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -224,
+        48
+      ],
+      "id": "9af462b2-a088-4525-bab2-4c44dfded7bf",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -16,
+        48
+      ],
+      "id": "27e50e0e-61b5-4e71-aed2-22bb597edd31",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=# FLUXO DE TRABALHO: ENRIQUECIMENTO DE LEAD COM FERRAMENTA DE BUSCA\n\n1.  **OBJETIVO:** Você é um analista de dados. Sua missão é enriquecer as informações de uma empresa com 100% de precisão, usando a **ferramenta de busca SerpAPI** que lhe foi fornecida.\n\n2.  **DADOS DE ENTRADA:**\n    * **Nome da Empresa:** `{{ $json.nomeEmpresa }}`\n    * **Site Fornecido:** `{{ $json.site }}`\n    * **Endereço Completo:** `{{ $json.enderecoCompleto }}`\n\n3.  **SEU PROCESSO DE VALIDAÇÃO HIERÁRQUICO (SIGA ESTRITAMENTE):**\n    Siga esta ordem, passando para o próximo passo apenas se o anterior não fornecer um resultado validado.\n\n    * **Passo A (Fonte Primária - Busca Precisa por Nome e Endereço):** Se o Passo A falhar, **use a ferramenta SerpAPI** para uma busca externa precisa.\n        * Execute uma busca combinando os dados. Use os termos: `CNPJ de \"{{ $json.nomeEmpresa }}\" \"{{ $json.enderecoCompleto }}\"`.\n        * Analise os resultados de fontes confiáveis. **Valide se o Nome e o Endereço** no site encontrado **correspondem exatamente** aos dados de entrada. Se corresponderem, use os dados e finalize.\n\n    * **Passo B (Fonte Secundária - Busca por Nome em Consultas de CNPJ):** Se os passos A e B falharem, **use a ferramenta SerpAPI** como último recurso para buscar por nome.\n        * Execute uma busca com termos como: `\"consulta CNPJ\" \"{{ $json.nomeEmpresa }}\"` ou `\"dados da Receita Federal\" \"{{ $json.nomeEmpresa }}\"`.\n        * O objetivo é encontrar um site de consulta de CNPJ que liste a empresa.\n        * **VALIDAÇÃO CRÍTICA:** Ao encontrar um resultado, **confirme se o nome da empresa corresponde exatamente**. Verifique também se a cidade/estado do endereço listado no site de consulta é compatível com o endereço de entrada (`{{ $json.enderecoCompleto }}`) para aumentar a confiança. Se houver múltiplas empresas com nomes parecidos, descarte o resultado para evitar erros.\n\n4.  **REGRAS DE SAÍDA:**\n    * Se você encontrar e validar o CNPJ e/ou o e-mail através deste processo, retorne os dados.\n    * Se, após seguir todos os passos, você **NÃO** encontrar uma informação com segurança, retorne o valor correspondente como `null`. **Não invente ou adivinhe a informação.**\n    * Retorne um ÚNICO objeto JSON contendo os dados originais e os novos dados validados (`cnpj` e `emailContato`). Sua resposta deve ser APENAS o código JSON puro, sem markdown ou explicações.\n\n**Exemplo de Saída Esperada:**\n{\n  \"nomeEmpresa\": \"{{ $json.nomeEmpresa }}\",\n  \"enderecoCompleto\": \"{{ $json.enderecoCompleto }}\",\n  \"site\": \"{{ $json.site }}\",\n  \"segmento\": \"{{ $json.segmento }}\",\n  \"telefonePrincipal\": \"{{ $json.telefonePrincipal }}\",\n  \"cnpj\": \"XX.XXX.XXX/XXXX-XX\", // ou null se não validado\n  \"emailContato\": \"contato@empresa.com.br\" // ou null se não encontrado\n}",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.2,
+      "position": [
+        144,
+        176
+      ],
+      "id": "cf03281d-b1f3-429d-a501-ec552f19b59a",
+      "name": "Agente de Enriquecimento"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        144,
+        384
+      ],
+      "id": "f483262c-2440-43b7-ae4c-605d922729d2",
+      "name": "Google Gemini Chat Model1",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "wpnXxOUztkU1HN0P",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolSerpApi",
+      "typeVersion": 1,
+      "position": [
+        288,
+        384
+      ],
+      "id": "aad7b42c-391a-423d-8b7a-41c1540bd740",
+      "name": "SerpAPI",
+      "credentials": {
+        "serpApi": {
+          "id": "L45aLQjMHyc2rPPb",
+          "name": "SerpAPI account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=# FLUXO DE TRABALHO\n\n\n2.  **PROCESSAMENTO:**\n    * Analise o retorno recebido: {{ $json.output }} e identifique a seção que contém a lista de parceiros.\n    * Para **cada parceiro** na lista, extraia os seguintes dados, **se estiverem disponíveis**:\n        * Nome da Empresa\n        * Endereço completo\n        * Site\n        * Segmento de atuação\n\t* Telefone\n\n3.  **GERAÇÃO DE CONTEÚDO:**\n    * Com os dados extraídos de cada parceiro, gere um corpo de e-mail em formato HTML.\n    * O HTML deve ser limpo e organizado, exibindo as informações de cada parceiro em um bloco separado para facilitar a leitura. Use a seguinte estrutura como modelo:\n\n    ```html\n    <!DOCTYPE html>\n    <html lang=\"pt-BR\">\n    <head>\n        <meta charset=\"UTF-8\">\n        <title>Lista de Parceiros ABCSEM</title>\n        <style>\n            body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }\n            .container { padding: 20px; }\n            .partner-block { \n                border: 1px solid #ddd; \n                padding: 15px; \n                margin-bottom: 15px; \n                border-radius: 5px; \n            }\n            h3 { color: #003366; }\n            h4 { margin-bottom: 5px; color: #0056b3; }\n            p { margin: 2px 0; }\n            a { color: #0066cc; }\n        </style>\n    </head>\n    <body>\n        <div class=\"container\">\n            <h3>Lista Atualizada de Parceiros ABCSEM</h3>\n            <p>Olá, equipe,</p>\n            <p>Segue abaixo a lista detalhada de parceiros extraída hoje do site da ABCSEM:</p>\n            \n            <div class=\"partner-block\">\n                <h4>AGRISTAR DO BRASIL LTDA</h4>\n                <p><strong>Endereço:</strong> Rodovia SP 340, Km 146,5 – Caixa Postal 73 CEP- 13830-970 – Santo Antônio de Posse/SP</p>\n                <p><strong>Site:</strong> http://www.agristar.com.br</p>\n\t\t<p>Telefone</p>\n                <p><strong>Segmento:</strong> sementes de hortaliças</p>\n            </div>\n            <p>Atenciosamente,<br>Seu Assistente de Automação</p>\n        </div>\n    </body>\n    </html>\n    ```\n\n4.  **ENVIO:**\n    * Envie o e-mail com o corpo em HTML gerado.\n    * **Destinatário:** williamroberto.crow@gmail.com\n    * **Assunto:** Lista Detalhada e Atualizada de Parceiros ABCSEM\n\n# REGRAS DE GERAÇÃO\n* \n* Se algum dado (como Endereço, Site, Telefone ou Segmento) não for encontrado para um parceiro, simplesmente omita a linha correspondente no bloco HTML daquele parceiro. Não mostre \"Segmento: N/A\", por exemplo.\n\n\n\n",
+        "options": {
+          "systemMessage": "Você é um assistente de automação integrado a um fluxo de trabalho do n8n. Sua função principal é executar uma etapa:\n3.  **Formatar:** Gerar uma saída limpa e bem formatada, especificamente em código HTML para e-mails, seguindo o modelo exato fornecido.\n\n**Regras Fundamentais:**\n- Siga estritamente todas as instruções do prompt do usuário.\n- Se um dado específico (como telefone, site ou endereço) não for encontrado, omita completamente a linha correspondente no HTML final. Não invente dados nem adicione placeholders como \"N/A\".\n- Sua resposta final deve ser apenas o conteúdo solicitado (o código HTML), sem conversas ou explicações adicionais."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.2,
+      "position": [
+        160,
+        -272
+      ],
+      "id": "18efd2f3-af09-4382-8505-7ba655f9761b",
+      "name": "Envio de e-mail"
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-2.0-flash",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        160,
+        -48
+      ],
+      "id": "70837e53-7066-44d5-82e5-f1bc966c1a15",
+      "name": "Google Gemini Chat Model2",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "wpnXxOUztkU1HN0P",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "",
+        "subject": "a",
+        "message": "a",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        496,
+        -272
+      ],
+      "id": "e54694a1-36f8-4be2-8b06-2b82fa45f573",
+      "name": "Send a message",
+      "webhookId": "6d175496-0dc1-4e67-b984-6ac6ad379557",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "KBqbD9D1d6P9eNSu",
+          "name": "Gmail account 2"
+        }
+      }
+    }
+  ],
+  "pinData": {
+    "When clicking ‘Execute workflow’": [
+      {
+        "json": {}
+      }
+    ]
+  },
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [
+          {
+            "node": "Envio de e-mail",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Agente de Enriquecimento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Agente de Enriquecimento": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Agente de Enriquecimento",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SerpAPI": {
+      "ai_tool": [
+        [
+          {
+            "node": "Agente de Enriquecimento",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model2": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Envio de e-mail",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Envio de e-mail": {
+      "main": [
+        [
+          {
+            "node": "Send a message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "versionId": "4113f68c-0211-4017-9001-6dc472ec3615",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "f7cef4b51d670f5b4c99d932c5737ac07c372759a787b8257b2d9d4fb07a2060"
+  },
+  "id": "3CHrKAp4obMQzlxc",
+  "tags": []
+}
