@@ -8,6 +8,11 @@ An automated n8n workflow designed to scrape leads from a website, enrich them w
 
 This project serves as a powerful example of how to build an "AI Agentic Workflow" where different AI agents with specific roles (Parser, Researcher) and tools (Web Search) are orchestrated in a pipeline to perform complex automation tasks.
 
+## Author
+
+-   **William Ferreira**
+    -   [![LinkedIn](https://img.shields.io/badge/LinkedIn-williamrferreira-0077B5?style=flat-square&logo=linkedin)](https://www.linkedin.com/in/williamrferreira/)
+
 ## Core Features
 
 -   **Automated Web Scraping**: Fetches the initial HTML content from a target URL.
